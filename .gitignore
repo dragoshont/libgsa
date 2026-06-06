@@ -1,6 +1,8 @@
 # Build output
 build/
 out/
+build-diff/
+.corecrypto-out/
 *.o
 *.a
 *.so

@@ -1,0 +1,105 @@
+name: corecrypto-drift
+
+# Detect when Apple silently revs corecrypto, WITHOUT redistributing any Apple
+# code. This job downloads Apple's source bundle only to compute its SHA-256,
+# compares it to the pin in corecrypto.pin, then DISCARDS it. The zip is never
+# uploaded as an artifact, never cached, and never committed — so nothing Apple
+# ships leaves this ephemeral runner. That keeps us inside Apple's corecrypto
+# Internal Use License (download + security verification is permitted;
+# redistribution is not).
+#
+# If the SHA drifts, Apple changed the source — which MAY change cryptographic
+# behavior. The job opens (or updates) a tracking issue prompting a maintainer
+# to run the self-hosted behavioral differential (corecrypto-differential.yml)
+# and, if behavior actually changed, refreeze the golden vectors + bump the pin.
+#
+# NOTE: if you'd rather no Apple fetch ever touch GitHub-hosted infra, change
+# `runs-on` to a self-hosted runner you control. The logic is identical.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-sha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pin
+        id: pin
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2046
+          url="$(grep '^CORECRYPTO_URL=' corecrypto.pin | cut -d= -f2-)"
+          sha="$(grep '^CORECRYPTO_SHA256=' corecrypto.pin | cut -d= -f2-)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "pinned=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch + hash + discard (no persistence)
+        id: hash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          # Download only to checksum; the file lives in a tmp dir on this
+          # ephemeral runner and is removed before the step ends.
+          curl -fsSL "${{ steps.pin.outputs.url }}" -o "$tmp/cc.zip"
+          got="$(sha256sum "$tmp/cc.zip" | awk '{print $1}')"
+          rm -rf "$tmp"
+          echo "got=$got" >> "$GITHUB_OUTPUT"
+          echo "Pinned: ${{ steps.pin.outputs.pinned }}"
+          echo "Live:   $got"
+
+      - name: Compare + open issue on drift
+        if: steps.hash.outputs.got != steps.pin.outputs.pinned
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pinned = "${{ steps.pin.outputs.pinned }}";
+            const got = "${{ steps.hash.outputs.got }}";
+            const title = "corecrypto drift: Apple changed the source bundle";
+            const body = [
+              "Apple's corecrypto source bundle SHA-256 no longer matches the pin.",
+              "",
+              "| | SHA-256 |",
+              "|---|---|",
+              "| pinned (`corecrypto.pin`) | `" + pinned + "` |",
+              "| live (Apple) | `" + got + "` |",
+              "",
+              "**This may change cryptographic behavior.** Next steps:",
+              "1. Run the self-hosted behavioral differential ",
+              "   (`.github/workflows/corecrypto-differential.yml`) on a machine you control.",
+              "2. If SRP/crypto output diverges, fix `libgsa` and refreeze the golden",
+              "   vectors under `tests/vectors/`.",
+              "3. Bump `CORECRYPTO_SHA256` in `corecrypto.pin` in the same commit.",
+              "",
+              "_No Apple source is attached or stored — this issue is metadata only._",
+            ].join("\n");
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "corecrypto-drift",
+            });
+            if (existing.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body: "Drift still present on " + new Date().toISOString() +
+                      " — live SHA `" + got + "`.",
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["corecrypto-drift"],
+              });
+            }

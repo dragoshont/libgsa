@@ -1,5 +1,8 @@
 # libgsa
 
+[![ci](https://github.com/dragoshont/libgsa/actions/workflows/ci.yml/badge.svg)](https://github.com/dragoshont/libgsa/actions/workflows/ci.yml)
+[![corecrypto-drift](https://github.com/dragoshont/libgsa/actions/workflows/corecrypto-drift.yml/badge.svg)](https://github.com/dragoshont/libgsa/actions/workflows/corecrypto-drift.yml)
+
 **A corecrypto-free implementation of Apple's GrandSlam (GSA) authentication, in
 C/C++ on OpenSSL.**
 
@@ -105,6 +108,44 @@ Crypto is byte-deterministic, so this is testable without ever calling Apple:
 4. **Live acceptance** (manual) — build AltServer with `-lcorecrypto_static`
    removed, authenticate with a test Apple ID, sign + launch on a device with no
    `Code=85`.
+
+## Detecting when Apple changes `corecrypto`
+
+Apple ships `corecrypto` with no version handle and silently revs it. Two CI
+signals catch that — neither one redistributes any Apple code:
+
+1. **SHA-drift watch** — [`corecrypto-drift.yml`](.github/workflows/corecrypto-drift.yml)
+   runs weekly, downloads Apple's source bundle *only to checksum it*, compares
+   the SHA-256 to the pin in [`corecrypto.pin`](corecrypto.pin), discards the
+   zip, and opens a tracking issue if it drifted. No build, no link, nothing
+   persisted.
+2. **Behavioral differential** — [`corecrypto-differential.yml`](.github/workflows/corecrypto-differential.yml)
+   actually builds `corecrypto` and diffs `libgsa`'s SRP/crypto output against
+   it byte-for-byte. This is the oracle that says whether *behavior* (not just
+   the source) changed.
+
+**Why the differential is self-hosted / local only.** Apple's corecrypto
+Internal Use License permits download + security verification but **forbids
+redistributing** the source or the built archive. Using `corecrypto` to confirm
+our reimplementation matches *is* security verification — that's allowed — but
+the artifact must never leave a machine you control. So the differential
+workflow runs on `self-hosted` runners only, is **bring-your-own** (it never
+downloads `corecrypto` — you supply your Apple-fetched `corecrypto.zip`),
+**uploads nothing**, and scrubs the local `.a` afterward. To run it yourself:
+
+```bash
+# 1) build corecrypto into a static archive (you accept Apple's license by doing so)
+A=$(scripts/build-corecrypto-static.sh /path/to/your/corecrypto.zip)
+# 2) build + run libgsa's differential against it
+cmake -B build-diff -DCMAKE_BUILD_TYPE=Release -DGSA_DIFF_CORECRYPTO="$A"
+cmake --build build-diff
+ctest --test-dir build-diff --output-on-failure -R srp
+```
+
+The golden vectors committed under `tests/vectors/` are the *outputs* of one
+such local run (just numbers — not Apple code), so the public test suite keeps
+proving `libgsa` matches the last validated `corecrypto` behavior with zero
+Apple code present.
 
 ## Credits / references (read as spec, not copied)
 

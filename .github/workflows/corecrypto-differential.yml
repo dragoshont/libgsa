@@ -1,0 +1,75 @@
+name: corecrypto-differential
+
+# BEHAVIORAL differential: build Apple corecrypto and diff libgsa's SRP/crypto
+# output against it byte-for-byte. corecrypto is the ground-truth oracle.
+#
+# *** SELF-HOSTED / OPERATOR-CONTROLLED RUNNERS ONLY ***
+# Apple's corecrypto Internal Use License permits download + security
+# verification but FORBIDS redistribution of the source or the built archive.
+# This workflow:
+#   * runs ONLY on a runner you control (runs-on: [self-hosted]) — never on
+#     GitHub-hosted public runners, whose logs/caches could leak the artifact;
+#   * is bring-your-own: it does NOT download corecrypto — you place your
+#     Apple-fetched corecrypto.zip on the runner and pass its path;
+#   * uploads NOTHING (no artifacts, no caches) — the .a never leaves the box;
+#   * only reports pass/fail of the differential.
+# Manual trigger only. Run it when corecrypto-drift.yml flags a SHA change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      corecrypto_zip:
+        description: "Absolute path to YOUR Apple-fetched corecrypto.zip on the self-hosted runner"
+        required: true
+      accept_license:
+        description: 'Type "I accept Apple corecrypto Internal Use License" to proceed'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    runs-on: [self-hosted]
+    steps:
+      - name: Gate — confirm license acceptance
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.accept_license }}" != "I accept Apple corecrypto Internal Use License" ]; then
+            echo "Refusing: license acceptance string not provided exactly."
+            exit 1
+          fi
+
+      - name: Gate — refuse GitHub-hosted runners
+        run: |
+          set -euo pipefail
+          # Heuristic: GitHub-hosted runners set RUNNER_ENVIRONMENT=github-hosted.
+          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            echo "Refusing to fetch/build Apple corecrypto on a GitHub-hosted runner."
+            echo "Move this job to a self-hosted runner you control."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Build corecrypto static archive (local, never uploaded)
+        id: cc
+        run: |
+          set -euo pipefail
+          a="$(scripts/build-corecrypto-static.sh '${{ github.event.inputs.corecrypto_zip }}')"
+          echo "archive=$a" >> "$GITHUB_OUTPUT"
+
+      - name: Configure libgsa with differential harness
+        run: |
+          cmake -B build-diff -DCMAKE_BUILD_TYPE=Release \
+            -DGSA_DIFF_CORECRYPTO='${{ steps.cc.outputs.archive }}'
+
+      - name: Build
+        run: cmake --build build-diff --config Release
+
+      - name: Run differential
+        run: ctest --test-dir build-diff --output-on-failure -R srp
+
+      - name: Scrub local corecrypto artifacts
+        if: always()
+        run: rm -rf .corecrypto-out build-diff

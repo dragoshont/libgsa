@@ -1,0 +1,13 @@
+# Pinned Apple corecrypto drop that libgsa's SRP/crypto behavior was validated
+# against. This is metadata ONLY — no Apple source is stored in this repo.
+#
+# - CORECRYPTO_URL is Apple's live "security" source bundle endpoint.
+# - CORECRYPTO_SHA256 is the SHA-256 of the zip that produced the frozen golden
+#   SRP vectors (tests/vectors/). When Apple silently revs corecrypto the SHA
+#   changes; the scheduled "corecrypto-drift" workflow then opens an issue so a
+#   maintainer can re-run the self-hosted behavioral differential.
+#
+# Updating the pin is a deliberate act: re-run the differential, refreeze the
+# golden vectors, then bump CORECRYPTO_SHA256 here in the same commit.
+CORECRYPTO_URL=https://developer.apple.com/file/?file=security&agree=Yes
+CORECRYPTO_SHA256=b0f72ee1235ba791c302922c28be141a4806f7e13d1a1958a51f139d35ad64a9
