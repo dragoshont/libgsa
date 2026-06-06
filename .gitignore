@@ -1,0 +1,29 @@
+# Build output
+build/
+out/
+*.o
+*.a
+*.so
+*.dylib
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Apple corecrypto — NEVER commit (Internal Use License, no redistribution).
+# Only used locally, optionally, as a differential-test oracle.
+*corecrypto*.zip
+**/corecrypto*/
+libcorecrypto*.a
+
+# Recorded GSA transcripts may contain account-identifying data — keep private.
+tests/vectors/transcript-*.bin
+tests/vectors/*.private.*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
