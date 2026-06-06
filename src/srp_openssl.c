@@ -30,7 +30,23 @@
 #include <string.h>
 
 #include <openssl/bn.h>
-#include <openssl/sha.h>
+#include <openssl/evp.h>
+
+/* Incremental SHA-256 over EVP (the low-level SHA256_* API is deprecated in
+ * OpenSSL 3.0 and trips -Werror). */
+typedef struct { EVP_MD_CTX *m; } sha256_stream;
+static void sha256_begin(sha256_stream *s) {
+    s->m = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(s->m, EVP_sha256(), NULL);
+}
+static void sha256_add(sha256_stream *s, const void *p, size_t n) {
+    if (p && n) EVP_DigestUpdate(s->m, p, n);
+}
+static void sha256_end(sha256_stream *s, uint8_t out[GSA_SHA256_LEN]) {
+    unsigned int l = 0;
+    EVP_DigestFinal_ex(s->m, out, &l);
+    EVP_MD_CTX_free(s->m);
+}
 
 /* RFC 5054, Appendix A — 2048-bit group N (hex), generator g = 2. */
 static const char *RFC5054_N_2048_HEX =
@@ -72,11 +88,11 @@ static int bn_to_padded(const BIGNUM *bn, size_t width, uint8_t **out) {
 static void sha256_cat(const uint8_t *a, size_t alen,
                        const uint8_t *b, size_t blen,
                        uint8_t out[GSA_SHA256_LEN]) {
-    SHA256_CTX c;
-    SHA256_Init(&c);
-    if (a && alen) SHA256_Update(&c, a, alen);
-    if (b && blen) SHA256_Update(&c, b, blen);
-    SHA256_Final(out, &c);
+    sha256_stream c;
+    sha256_begin(&c);
+    sha256_add(&c, a, alen);
+    sha256_add(&c, b, blen);
+    sha256_end(&c, out);
 }
 
 gsa_srp_ctx *gsa_srp_new(void) {
@@ -249,15 +265,15 @@ int gsa_srp_process(gsa_srp_ctx *ctx,
         gsa_sha256((const uint8_t *)(username ? username : ""),
                    username ? strlen(username) : 0, hI);
 
-        SHA256_CTX c;
-        SHA256_Init(&c);
-        SHA256_Update(&c, hxor, sizeof(hxor));
-        SHA256_Update(&c, hI, sizeof(hI));
-        SHA256_Update(&c, salt, salt_len);
-        SHA256_Update(&c, A_pad, width);
-        SHA256_Update(&c, B_pad, width);
-        SHA256_Update(&c, ctx->K, sizeof(ctx->K));
-        SHA256_Final(ctx->M1, &c);
+        sha256_stream c;
+        sha256_begin(&c);
+        sha256_add(&c, hxor, sizeof(hxor));
+        sha256_add(&c, hI, sizeof(hI));
+        sha256_add(&c, salt, salt_len);
+        sha256_add(&c, A_pad, width);
+        sha256_add(&c, B_pad, width);
+        sha256_add(&c, ctx->K, sizeof(ctx->K));
+        sha256_end(&c, ctx->M1);
         ctx->have_M1 = 1;
         memcpy(out_m1, ctx->M1, GSA_SHA256_LEN);
     }
@@ -280,12 +296,12 @@ int gsa_srp_verify(gsa_srp_ctx *ctx, const uint8_t M2[32]) {
     if (bn_to_padded(ctx->A, width, &A_pad)) return -1;
 
     uint8_t expected[GSA_SHA256_LEN];
-    SHA256_CTX c;
-    SHA256_Init(&c);
-    SHA256_Update(&c, A_pad, width);
-    SHA256_Update(&c, ctx->M1, sizeof(ctx->M1));
-    SHA256_Update(&c, ctx->K, sizeof(ctx->K));
-    SHA256_Final(expected, &c);
+    sha256_stream c;
+    sha256_begin(&c);
+    sha256_add(&c, A_pad, width);
+    sha256_add(&c, ctx->M1, sizeof(ctx->M1));
+    sha256_add(&c, ctx->K, sizeof(ctx->K));
+    sha256_end(&c, expected);
     free(A_pad);
 
     return gsa_consttime_eq(expected, M2, GSA_SHA256_LEN) == 1 ? 0 : -1;
