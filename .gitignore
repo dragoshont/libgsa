@@ -5,6 +5,7 @@ out/
 *.a
 *.so
 *.dylib
+*.log
 
 # CMake
 CMakeCache.txt
