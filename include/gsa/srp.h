@@ -3,7 +3,8 @@
  *
  * Mirrors the corecrypto SRP usage in AltSign's AppleAPI+Authentication.cpp:
  *   - RFC 5054 2048-bit group, SHA-256 hash.
- *   - noUsernameInX: x = H(salt || H(password_key))  (username NOT folded in).
+ *   - noUsernameInX: x = H(salt || H(":" || password_key))  (username dropped,
+ *     but the ":" separator is retained; proven against the `srp` oracle).
  *   - the "password" fed to SRP is the s2k/s2k_fo-derived key, see gsa_srp_s2k.
  *
  * Flow (matches AppleAPI::Authenticate):
@@ -17,8 +18,8 @@
  *   8. gsa_srp_session_key(ctx) -> K, used to derive the extra-data keys.
  *
  * EXACT M1/u formulas and whether H(I) is folded into M1 are pinned by the
- * differential test against corecrypto + pypush (see tests/test_srp.c). Treat
- * the constants here as "validated by vector", not "assumed".
+ * golden-vector test against the MIT `srp` oracle (see tests/test_srp.c and
+ * tests/oracle/gsa_oracle.py). The constants here are validated by vector.
  */
 #ifndef GSA_SRP_H
 #define GSA_SRP_H

@@ -34,6 +34,16 @@
 #include <openssl/bn.h>
 #include <openssl/evp.h>
 
+/* The named BN_rand top/bottom selectors were added to OpenSSL 1.1.1; LibreSSL
+ * (used by the Alpine build toolchain) ships the older API and omits the
+ * macros. Fall back to the canonical integer values — identical behaviour. */
+#ifndef BN_RAND_TOP_ONE
+#define BN_RAND_TOP_ONE 0
+#endif
+#ifndef BN_RAND_BOTTOM_ANY
+#define BN_RAND_BOTTOM_ANY 0
+#endif
+
 /* Incremental SHA-256 over EVP (the low-level SHA256_* API is deprecated in
  * OpenSSL 3.0 and trips -Werror). */
 typedef struct { EVP_MD_CTX *m; } sha256_stream;
